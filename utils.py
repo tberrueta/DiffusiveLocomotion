@@ -47,6 +47,7 @@ def diffusion_vel(x, dt):
     return vec
 
 def rattling(x, dt, diffVel=True):
+    eps = 1e-10
     if diffVel:
         vec = diffusion_vel(x, dt)
     else:
@@ -55,11 +56,15 @@ def rattling(x, dt, diffVel=True):
     if len(x.shape) == 1:
         s = np.var(vec)
         if s < 1e-10:
-            R = 0.5*np.log(1e-10)
+            R = 0.5*np.log(eps)
         else:
             R = 0.5*np.log(s)
     else:
-        R = 0.5*np.log(np.linalg.det(np.cov(vec.T)))
+        s = np.linalg.det(np.cov(vec.T))
+        if s < 1e-10:
+            R = 0.5*np.log(eps)
+        else:
+            R = 0.5*np.log(s)
     return R
 
 def rattling_windows(mat, dt, window_sz, overlap, diffVel=True):

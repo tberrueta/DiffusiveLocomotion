@@ -1,25 +1,61 @@
 from utils import *
 
+def SLIP_walker_3D(x,u,gr=0):
+    """
+    The order of the states here is:
+    x_m   xdot_m  y_m   ydot_m  z_m   zdot_m  x_t    y_t
+    x[0]   x[1]   x[2]   x[3]   x[4]   x[5]   x[6]   x[7]
+    
+    The order of the controls here is:
+    u_s    u_tx   u_ty
+    u[0]   u[1]   u[2]
+    """
+    l_max = 1
+    g = 9.81
+    k = 100
+    m = 1
+    l = lambda x: np.sqrt(((x[0]-x[6])**2.0)+((x[2]-x[7])**2.0)+((x[4]-gr)**2.0))
+    phi = lambda x: x[4]-gr-(x[4]-gr)*l_max/l(x)
+    if phi(x) < 0: # stance
+        xdot = np.array([x[1],
+                        ((k*(l_max-l(x)))+u[0])*((x[0]-x[6])/(m*l(x))),
+                        x[3],
+                        ((k*(l_max-l(x)))+u[0])*((x[2]-x[7])/(m*l(x))),
+                        x[5],
+                        ((k*(l_max-l(x)))+u[0])*((x[4]-gr)/(m*l(x)))-g,
+                        0.0,
+                        0.0])
+    else: # flight
+        xdot = np.array([x[1],
+                         0.0,
+                         x[3],
+                         0.0,
+                         x[5],
+                         -g,
+                         x[1]+u[1],
+                         x[3]+u[2]])
+    return xdot.flatten()
+    
 def SLIP_walker(x,u):
-		l_max = 1
-		g = 9.81
-		k = 100
-		m = 1
-		l = lambda x: np.sqrt(((x[0]-x[4])**2.0)+(x[2]**2.0))
-		phi = lambda x: x[2]-x[2]*l_max/l(x)
-		if phi(x) < 0: # stance
-			xdot = np.array([x[1],
-						    ((k*(l_max-l(x)))+u[1])*((x[0]-x[4])/(m*l(x))),
-						    x[3],
-						    ((k*(l_max-l(x)))+u[1])*(x[2]/(m*l(x)))-g,
-						    0.0])
-		else: # flight
-			xdot = np.array([x[1],
-							 0.0,
-							 x[3],
-						 	 -g,
-						     x[1]+u[0]])
-		return xdot.flatten()
+    l_max = 1
+    g = 9.81
+    k = 100
+    m = 1
+    l = lambda x: np.sqrt(((x[0]-x[4])**2.0)+(x[2]**2.0))
+    phi = lambda x: x[2]-x[2]*l_max/l(x)
+    if phi(x) < 0: # stance
+        xdot = np.array([x[1],
+                        ((k*(l_max-l(x)))+u[1])*((x[0]-x[4])/(m*l(x))),
+                        x[3],
+                        ((k*(l_max-l(x)))+u[1])*(x[2]/(m*l(x)))-g,
+                        0.0])
+    else: # flight
+        xdot = np.array([x[1],
+                         0.0,
+                         x[3],
+                         -g,
+                         x[1]+u[0]])
+    return xdot.flatten()
     
 def diff_drive(x,u):
     xvel = [u[0]*np.cos(x[2]),
@@ -132,3 +168,34 @@ def SLIP_objective(xvec, uvec, a=1, b=1, xloc = 0.0, var_ind=0, dt=0.05, w=1, w_
     if np.abs(w) > eps:
         c += w*np.mean(rattling_windows(xvec[var_ind].T, dt, w_sz, ov))
     return c
+
+
+def SLIP_objective_3D(xvec, uvec, mean1=np.zeros(2), cov1=np.eye(2), mean2=np.zeros(2), cov2=np.eye(2), var_ind=0, dt=0.05, w1=1, w2=1, w_sz=20, ov=1, xdes=None, Q=None, R=None):
+    """
+    This objective incorporates a regulator on control effort,
+    a quadratic component to allow for maintaining a stable height (i.e., safety),
+    and a diffusion component.
+    """
+    eps = 1e-10
+    if xdes is None:
+        xd = np.zeros(xvec.shape)
+    elif len(xdes.shape) == 1:
+        xd = np.repeat(xdes.reshape(-1,1),xvec.shape[1],axis=1)
+        
+    c1 = 0
+    c2 = 0
+    c3 = 0
+    for i in range(xvec.shape[1]):
+        # Cost due to potential
+        c1 += -w1*(gauss_pdf(xvec[var_ind,i],mean1,cov1) + gauss_pdf(xvec[var_ind,i],mean2,cov2)+1.0)
+        
+        # Optional costs on state regulation
+        if R is not None:
+            c3 += uvec[:,i].dot(R).dot(uvec[:,i].T)
+        if Q is not None:
+            c3 += (xvec[:,i]-xd[:,i]).dot(Q).dot((xvec[:,i]-xd[:,i]).T)
+            
+    # Cost due to diffusion
+    if np.abs(w2) > eps:
+        c2 += w2*np.mean(rattling_windows(xvec[var_ind].T, dt, w_sz, ov))
+    return c1+c2+c3
